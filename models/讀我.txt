@@ -1,0 +1,11 @@
+Blender 匯出的 .glb 丟這個資料夾。
+
+丟進來之後，打開 src\config.js，
+把對應場景的 model 從 null 改成檔名，例如：
+
+    model: 'models/dessert.glb',
+
+存檔，瀏覽器按 F5 就會換成真模型。
+
+匯出的注意事項（幾何節點、Cycles 材質、Draco 壓縮那些坑）
+寫在上一層的「讀我-怎麼用.md」裡面。
