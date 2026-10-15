@@ -12,7 +12,25 @@
 import * as THREE from 'three';
 import { GEMS } from './config.js';
 
+import * as DB from './db.js';
+
 const KEY = 'island-map.gems.v1';
+
+let visitorId = null;
+export function setVisitor(id) { visitorId = id; }
+
+// 從資料庫把自己的存款拿回來（換裝置也看得到）
+export async function refresh() {
+  if (!DB.enabled() || !visitorId) return load();
+  const rows = await DB.select('gems', `select=amount&visitor=eq.${encodeURIComponent(visitorId)}`);
+  if (rows && rows.length) save(rows[0].amount ?? 0);   // 拿不到就維持本機那份
+  return load();
+}
+
+function sync() {
+  if (!DB.enabled() || !visitorId) return;
+  DB.insert('gems', { visitor: visitorId, amount: load(), at: new Date().toISOString() }, { upsert: true });
+}
 
 // ---- 存款 ----
 
@@ -31,7 +49,9 @@ function save(n) {
 }
 
 export function add(n = 1) {
-  return save(load() + n);
+  const v = save(load() + n);
+  sync();
+  return v;
 }
 
 // 花掉。不夠就回傳 false，不會扣成負的
@@ -39,6 +59,7 @@ export function spend(n = 1) {
   const have = load();
   if (have < n) return false;
   save(have - n);
+  sync();
   return true;
 }
 

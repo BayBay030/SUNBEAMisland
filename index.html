@@ -78,7 +78,26 @@
     width: 7px; height: 7px; border-radius: 50%;
     background: #7fd1ae;
     box-shadow: 0 0 10px #7fd1ae;
+    transition: background 0.3s ease, box-shadow 0.3s ease;
   }
+
+  /* 連不到資料庫：點變琥珀色，旁邊冒出「離線」。平常完全看不到這兩個東西。 */
+  #place .net-state {
+    display: none;
+    margin-left: 2px;
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: rgba(240, 176, 90, 0.16);
+    border: 1px solid rgba(240, 176, 90, 0.4);
+    color: #f0b05a;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+  #place.offline .dot {
+    background: #f0b05a;
+    box-shadow: 0 0 10px #f0b05a;
+  }
+  #place.offline .net-state { display: inline-block; }
   #place .name { font-size: 14px; letter-spacing: 0.06em; }
 
   /* 返回鈕，只有在室內才出現 */
@@ -712,6 +731,7 @@
 <div id="place">
   <span class="dot"></span>
   <span class="name">—</span>
+  <span class="net-state">離線</span>
 </div>
 
 <button id="back" type="button">

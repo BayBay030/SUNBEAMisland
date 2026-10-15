@@ -19,8 +19,8 @@ export const SCENES = {
     placeholder: 'island',       // model 是 null 時用哪種假模型（island / room）
     isOutdoor: true,             // 外面的大地圖，沒有返回鈕
     camera: {
-      position: [28, 21, 28],    // 鏡頭站的位置
-      target:   [0.5, 3.2, -0.5],// 鏡頭看的位置（三座島的中間）
+      position: [23, 17.5, 23],  // 鏡頭站的位置（數字越小越近）
+      target:   [0.5, 2.6, -0.5],// 鏡頭看的位置（三座島的中間）
       fov: 32,
     },
     // 用滑鼠拖動整座島。把整個 drag 拿掉（或設成 null）就不能拖了。
@@ -144,15 +144,29 @@ export const AVATAR = {
 };
 
 // ============================================================
+//  Supabase（大家共用的資料庫）
+//  專案 SUNBEAMISLAND，2026-10-15 建好
+//
+//  下面那把金鑰是 publishable（可公開）的，本來就設計成寫在前端，
+//  任何人打開網頁都看得到，這是正常的。真正擋住壞事的是資料庫那邊
+//  的權限規則（只能新增、不能刪別人的），不是把金鑰藏起來。
+//
+//  url 或 key 留空 → 自動退回「只有自己看得到」的本機模式。
+// ============================================================
+
+export const SUPABASE = {
+  url: 'https://xvkuatboiznfighaopcp.supabase.co',
+  key: 'sb_publishable_B3GRIHrRETQoya2NLl5BJw_97hIQebb',
+};
+
+// ============================================================
 //  連線（非同步）
 // ============================================================
 
 export const NET = {
-  // 'local'  = 同一台電腦的不同分頁互相看（預設，不用伺服器）
-  //            想試：開兩個瀏覽器視窗連到同一個網址，就會看到兩隻角色
-  // 'remote' = 真的連線，要填下面的 endpoint
-  mode: 'local',
-  endpoint: '',          // 例如 'https://你的網址/api'
+  // 'remote' = 真的連線，大家互相看得到（走上面的 SUPABASE 設定）
+  // 'local'  = 只有同一台電腦的不同分頁互相看（沒有資料庫時的退路）
+  mode: 'remote',
 
   publishEvery: 1500,    // 多久送一次自己的位置（毫秒）
   peerTimeout: 30000,    // 多久沒消息就當這個人走了
@@ -214,62 +228,80 @@ export const GEMS = {
 // ============================================================
 
 export const SKY = {
-  // 由上到下的漸層
-  top:     '#4a3f73',    // 天頂，帶紫的夜藍
-  mid:     '#e98fa6',    // 中段的粉
-  horizon: '#ffc79b',    // 接近地平線的暖橘
-  bottom:  '#7a4c68',    // 地平線以下，暗一點的玫瑰
+  // 直接用 road test  88.blend 那張全景天空圖（2:1 等距長方投影）
+  // 原檔：D:/2026創作計畫/ChatGPT Image 2026年7月27日 上午02_01_55.png
+  image: 'textures/sky.png',
 
-  // 天空裡那顆太陽（反射也會吃到它）
-  sunColor: '#ffe3b0',
-  sunX: 0.68,            // 左右位置 0~1
-  sunY: 0.66,            // 高度，0 是天頂、1 是最下面
-  sunSize: 0.30,         // 光暈大小
+  rotation: 3.5465,      // 水平轉角（弧度），對齊原檔 Mapping 節點的設定
+  intensity: 1.0,        // 背景亮度
+  envIntensity: 1.0,     // 拿來當反射光源的強度（原檔 BG_Light 是 0.78）
 
-  fog:     '#c2869e',    // 遠處的霧色
-  fogNear: 36,
-  fogFar:  78,
+  // 載不到圖的時候用的備援漸層
+  top:     '#c5b6d9',
+  mid:     '#e7becc',
+  horizon: '#f9c4b9',
+  bottom:  '#a598c2',
 
-  exposure: 1.1,         // 整體亮度
+  fog:     '#c2869e',
+  fogNear: 40,
+  fogFar:  95,
+
+  exposure: 1.0,
 };
 
 export const LIGHTS = {
-  sunColor: '#ffb98c',       // 主光（夕陽），偏橘粉
-  sunIntensity: 2.9,
-  sunPos: [-15, 7, -13],     // 島的後方＝逆光夕陽，海面才會有光路；壓低＝影子拉長
+  // 原檔「夕陽_太陽光」：線性 (1.0, 0.56, 0.34)、強度 8.19、仰角約 11 度
+  sunColor: '#ffc79e',
+  sunIntensity: 3.1,
+  sunPos: [-19.8, 4.3, -8.5],   // 照原檔方向換算（Blender 是 Z 軸向上，這裡是 Y 軸向上）
 
-  fillColor: '#8f9ed8',      // 對向的補光，冷色才襯得出夕陽
-  fillIntensity: 1.35,
-  fillPos: [16, 10, 14],     // 鏡頭這一側，把逆光的暗面補起來
+  // 原檔「夕陽_補光」：冷藍，強度只有主光的 6%。
+  // 我上一版調到 47%，整個畫面才會糊掉。
+  fillColor: '#bfc4ff',
+  fillIntensity: 0.32,
+  fillPos: [16, 10.7, -10.7],
 
-  skyColor: '#ffd3dc',       // 天空打下來的環境光
-  groundColor: '#6b4a5a',    // 地面反上來的
-  ambientIntensity: 0.85,
+  skyColor: '#e7becc',
+  groundColor: '#8d7a95',
+  ambientIntensity: 0.7,
 };
 
 export const WATER = {
-  // 海面的夕陽漸層：由遠（地平線）到近
-  horizonColor: '#ffbe86',   // 最遠處，被夕陽燒亮的那一圈
-  midColor:     '#d1769a',   // 中段的粉
-  nearColor:    '#5e3f66',   // 離鏡頭最近，最深的紫
+  // 照 road test  88.blend 的「低多邊形_海」：底色是深藍紫，
+  // 看起來的粉色是從天空反射來的，不是材質本身的顏色
+  color: '#4c4e90',
+  roughness: 0.34,
+  metalness: 0.28,
+  opacity: 1,
 
-  roughness: 0.22,
-  metalness: 0.35,
-  opacity: 0.96,
+  y: -11,
+  radius: 130,
 
-  y: -11,                    // 海面高度。越高離島越近
-  radius: 130,               // 要夠大才會延伸到地平線（遠處會被霧吃掉，形成海平線）
+  // 波光：兩層會動的細紋，模仿原檔的兩層 Wave + 兩層 Noise
+  wave: true,
+  waveScale: 26,         // 紋路密度
+  waveSpeed: 0.013,      // 流動速度
+  waveStrength: 0.42,    // 凹凸強度
+};
 
-  // 夕陽在海上拉出來的那道光路
-  sunPath: true,
-  sunPathColor: '#ffcf9a',
-  sunPathLength: 70,         // 光路多長
-  sunPathWidth: 11,          // 多寬
+// ============================================================
+//  主島的底板（從 road test  88.blend 輸出的）
+//  這組會蓋掉程式生的圓形地面，其他東西（神木島、蜜糖丘…）照舊
+// ============================================================
 
-  sunDisc: true,             // 海平線上那顆太陽
-  sunDiscSize: 17,
-  sunDiscDistance: 76,
-  sunDiscY: 19,              // 太陽離海面多高。太低會被島擋在後面看不到
+export const ISLAND_BASE = {
+  enabled: true,
+  model: 'models/island-base.glb',   // 陸地 + 馬路面
+  scale: 0.31,                       // 原始 60x58，縮到約 19 跟現在的島差不多大
+  y: -0.22,                          // 上下微調，讓馬路面大約落在 0 的高度
+  rotateY: 0,                        // 想轉個角度就改這裡（弧度，1.57 約等於 90 度）
+
+  // 車子
+  cars: 'models/cars.glb',
+  roadPath: 'models/road-path.json', // 288 點的封閉軌道
+  carCount: 7,                       // 路上同時跑幾台（會從 5 台車裡輪流複製）
+  carSpeed: 0.035,                   // 跑一圈要多久的倒數，越大越快
+  carScale: 1,                       // 車子相對底板的大小，覺得車太小就調大
 };
 
 // 一開始進去哪個場景

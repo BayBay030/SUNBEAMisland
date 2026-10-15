@@ -1,0 +1,8 @@
+# Blender 來回用的工作檔，可以重新產生
+export/
+
+# Mac 時代的影子檔
+.DS_Store
+._*
+
+node_modules/

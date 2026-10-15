@@ -470,7 +470,7 @@ export function buildIsland() {
   const islet = new THREE.Group();
   islet.name = 'float_神木島';
   // 鏡頭在 (+X, +Z) 看向原點，所以畫面右邊的方向是 (+X, -Z)
-  islet.position.set(9.9, 3.9, -9.9);
+  islet.position.set(7.9, 3.5, -7.9);
   g.add(islet);
 
   const isletGround = makeFloatingGround({
@@ -511,73 +511,27 @@ export function buildIsland() {
   g.add(hill);
 
   // ---- 底下的海（不參與點擊）----
+  // 底色是深藍紫，看起來的粉色是從天空反射來的 —— 跟原檔同一個做法
+  const waveTex = WATER.wave ? makeWaveTexture() : null;
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(WATER.color),
+    roughness: WATER.roughness,
+    metalness: WATER.metalness,
+  });
+  if (waveTex) {
+    waterMat.normalMap = waveTex;
+    waterMat.normalScale = new THREE.Vector2(WATER.waveStrength, WATER.waveStrength);
+    waterMat.roughnessMap = waveTex;      // 波峰波谷的粗糙度不一樣，才會有閃動的光
+  }
+
   const water = new THREE.Mesh(
     new THREE.CylinderGeometry(WATER.radius, WATER.radius, 0.3, 64),
-    (() => {
-      const seaTex = makeSeaTexture();
-      return new THREE.MeshStandardMaterial({
-        map: seaTex,
-        emissive: 0xffffff,
-        emissiveMap: seaTex,
-        emissiveIntensity: 0.32,   // 讓遠處地平線那圈自己亮一點，像被夕陽燒到
-        roughness: WATER.roughness,
-        metalness: WATER.metalness,
-        transparent: true,
-        opacity: WATER.opacity,
-      });
-    })()
+    waterMat
   );
   water.position.y = WATER.y;
   water.name = '海面_nohit';
+  water.userData.waveTex = waveTex;       // 主迴圈會慢慢推它，海面才會流動
   g.add(water);
-
-  // 太陽的水平方向（跟主光同一邊，光路才對得起來）
-  const sp = LIGHTS.sunPos;
-  const sunAngle = Math.atan2(sp[0], sp[2]);
-
-  // 海平線上那顆太陽
-  if (WATER.sunDisc) {
-    const d = WATER.sunDiscDistance;
-    const disc = new THREE.Mesh(
-      new THREE.PlaneGeometry(WATER.sunDiscSize, WATER.sunDiscSize),
-      new THREE.MeshBasicMaterial({
-        map: makeSunDiscTexture(),
-        color: new THREE.Color(WATER.sunPathColor),
-        transparent: true,
-        depthWrite: false,
-        fog: false,
-        blending: THREE.AdditiveBlending,
-      })
-    );
-    const dy = WATER.y + (WATER.sunDiscY ?? 5.5);
-    disc.position.set(Math.sin(sunAngle) * d, dy, Math.cos(sunAngle) * d);
-    disc.lookAt(0, dy, 0);                // 正對著島這邊
-    disc.name = '夕陽_nohit';
-    g.add(disc);
-  }
-
-  // 夕陽在海面上鋪過來的那道光路
-  if (WATER.sunPath) {
-    const path = new THREE.Mesh(
-      new THREE.PlaneGeometry(WATER.sunPathWidth, WATER.sunPathLength),
-      new THREE.MeshBasicMaterial({
-        map: makeSunPathTexture(),
-        color: new THREE.Color(WATER.sunPathColor),
-        transparent: true,
-        depthWrite: false,
-        fog: false,
-        blending: THREE.AdditiveBlending,
-      })
-    );
-    // 先轉到水平，再轉向太陽那一邊。順序用 YXZ 才不會互相打架。
-    path.rotation.order = 'YXZ';
-    path.rotation.y = sunAngle;
-    path.rotation.x = -Math.PI / 2;
-    const mid = WATER.sunPathLength / 2;
-    path.position.set(Math.sin(sunAngle) * mid, WATER.y + 0.25, Math.cos(sunAngle) * mid);
-    path.name = '夕陽光路_nohit';
-    g.add(path);
-  }
 
   return g;
 }
@@ -586,104 +540,43 @@ export function buildIsland() {
 //  室內：地板 + 兩面牆 + 幾件家具
 // ------------------------------------------------------------
 // ------------------------------------------------------------
-//  海面的夕陽漸層
-//  海是一個圓盤，所以用放射狀漸層剛好：外圈＝遠處＝地平線＝暖金，
-//  內圈＝靠近鏡頭＝深紫。這樣不管島怎麼轉都還是一片夕陽的海。
+//  海面的波光
+//  原檔是兩層 Wave + 兩層 Noise 做凹凸，這裡用一張會捲動的法線貼圖模擬：
+//  兩個方向交錯的細紋，讓反射的夕陽在海面上閃動
 // ------------------------------------------------------------
-function makeSeaTexture() {
-  const N = 512;
+function makeWaveTexture() {
+  const N = 256;
   const c = document.createElement('canvas');
   c.width = c.height = N;
   const ctx = c.getContext('2d');
+  const img = ctx.createImageData(N, N);
 
-  const g = ctx.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
-  // 停點要落在「看得到的範圍」內。霧大約在半徑 78/130 ≈ 0.6 的地方吃掉畫面，
-  // 所以暖色帶要在 0.6 附近，才會變成一條發光的海平線，而不是在霧外面白做工。
-  g.addColorStop(0.00, WATER.nearColor);
-  g.addColorStop(0.24, WATER.nearColor);
-  g.addColorStop(0.44, WATER.midColor);
-  g.addColorStop(0.62, WATER.horizonColor);
-  g.addColorStop(1.00, WATER.horizonColor);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, N, N);
+  const S1 = 0.055, S2 = 0.13;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      // 兩層不同方向、不同密度的波，疊起來就不會看出規律
+      const a = Math.sin(x * S1 + Math.sin(y * S1 * 0.7) * 2.2);
+      const b = Math.sin((x * 0.6 + y) * S2 + Math.cos(x * S2 * 0.5) * 1.6);
+      const h = a * 0.6 + b * 0.4;
 
-  // 一圈圈的波紋，讓海面不是一塊死掉的色塊
-  ctx.globalCompositeOperation = 'overlay';
-  for (let i = 0; i < 130; i++) {
-    const r = (0.1 + Math.random() * 0.9) * (N / 2);
-    ctx.beginPath();
-    ctx.arc(N / 2, N / 2, r, 0, Math.PI * 2);
-    ctx.strokeStyle = Math.random() > 0.5
-      ? 'rgba(255, 228, 190, 0.16)'
-      : 'rgba(40, 20, 50, 0.14)';
-    ctx.lineWidth = 0.6 + Math.random() * 2.2;
-    ctx.stroke();
+      // 由高度差推法線（左右、上下各取一點差值）
+      const hx = Math.sin((x + 1) * S1 + Math.sin(y * S1 * 0.7) * 2.2) * 0.6
+               + Math.sin(((x + 1) * 0.6 + y) * S2 + Math.cos((x + 1) * S2 * 0.5) * 1.6) * 0.4;
+      const hy = Math.sin(x * S1 + Math.sin((y + 1) * S1 * 0.7) * 2.2) * 0.6
+               + Math.sin((x * 0.6 + y + 1) * S2 + Math.cos(x * S2 * 0.5) * 1.6) * 0.4;
+
+      const i = (y * N + x) * 4;
+      img.data[i]     = 128 + (h - hx) * 110;   // 法線 X
+      img.data[i + 1] = 128 + (h - hy) * 110;   // 法線 Y
+      img.data[i + 2] = 235;                    // 法線 Z，偏平
+      img.data[i + 3] = 255;
+    }
   }
-  ctx.globalCompositeOperation = 'source-over';
+  ctx.putImageData(img, 0, 0);
 
   const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// ------------------------------------------------------------
-//  海平線上那顆太陽：中心白、外圈橘，散開
-// ------------------------------------------------------------
-function makeSunDiscTexture() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-  g.addColorStop(0.00, 'rgba(255,255,255,1)');
-  g.addColorStop(0.16, 'rgba(255,246,222,0.96)');
-  g.addColorStop(0.30, 'rgba(255,206,150,0.62)');
-  g.addColorStop(0.60, 'rgba(255,170,140,0.22)');
-  g.addColorStop(1.00, 'rgba(255,150,140,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 128, 128);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-// ------------------------------------------------------------
-//  夕陽打在海面上的那道光路：靠太陽那端最亮，往鏡頭散掉
-// ------------------------------------------------------------
-function makeSunPathTexture() {
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 256;
-  const ctx = c.getContext('2d');
-
-  // 縱向：靠近太陽那端最亮，往鏡頭這邊慢慢散掉
-  const v = ctx.createLinearGradient(0, 256, 0, 0);
-  v.addColorStop(0.0, 'rgba(255,255,255,0.98)');
-  v.addColorStop(0.30, 'rgba(255,255,255,0.5)');
-  v.addColorStop(1.0, 'rgba(255,255,255,0)');
-  ctx.fillStyle = v;
-  ctx.fillRect(0, 0, 64, 256);
-
-  // 橫向收邊，不要變成一條硬梆梆的長方形
-  const h = ctx.createLinearGradient(0, 0, 64, 0);
-  h.addColorStop(0.0, 'rgba(0,0,0,1)');
-  h.addColorStop(0.5, 'rgba(0,0,0,0)');
-  h.addColorStop(1.0, 'rgba(0,0,0,1)');
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = h;
-  ctx.fillRect(0, 0, 64, 256);
-  ctx.globalCompositeOperation = 'source-over';
-
-  // 波光：隨機幾條橫向的亮線，像水面在晃
-  ctx.globalCompositeOperation = 'destination-out';
-  for (let i = 0; i < 46; i++) {
-    const y = Math.random() * 256;
-    ctx.fillStyle = `rgba(0,0,0,${0.15 + Math.random() * 0.4})`;
-    ctx.fillRect(0, y, 64, 1 + Math.random() * 2.5);
-  }
-  ctx.globalCompositeOperation = 'source-over';
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(WATER.waveScale ?? 26, WATER.waveScale ?? 26);
   return tex;
 }
 

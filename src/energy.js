@@ -8,7 +8,16 @@
 //  其他檔案一行都不用動。
 // ============================================================
 
+import * as DB from './db.js';
+
 const KEY = 'island-map.energy.v1';
+
+// 畫面需要「馬上」拿得到資料（建樹的時候），但資料庫是慢的。
+// 所以記憶體裡放一份快取：先用本機的開場，背景去資料庫撈，撈回來再重畫。
+let cache = null;
+let onChange = null;
+
+export function watch(fn) { onChange = fn; }
 
 // 今天的日期（當地時間，YYYY-MM-DD）
 export function today() {
@@ -19,17 +28,30 @@ export function today() {
 
 // 讀出全部紀錄。瀏覽器的儲存可能被關掉或清空，所以一律包起來，壞掉就當成空的
 export function load() {
+  if (cache) return cache;
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const list = JSON.parse(raw);
-    return Array.isArray(list) ? list : [];
+    const list = raw ? JSON.parse(raw) : [];
+    cache = Array.isArray(list) ? list : [];
   } catch {
-    return [];
+    cache = [];
   }
+  return cache;
+}
+
+// 去資料庫拿大家投的能量，拿到就蓋掉快取並通知外面重畫
+export async function refresh() {
+  if (!DB.enabled()) return load();
+  const rows = await DB.select('energy', 'select=*&order=at.asc&limit=2000');
+  if (!rows) return load();      // 連不上 → 維持原狀，千萬不能當成「沒資料」清空
+  cache = rows.map((r) => ({ d: r.day, e: r.emotion, t: r.note ?? '', s: Number(r.seed) || 1, v: r.visitor }));
+  save(cache);
+  onChange?.(cache);
+  return cache;
 }
 
 function save(list) {
+  cache = list;
   try {
     localStorage.setItem(KEY, JSON.stringify(list));
     return true;
@@ -40,15 +62,24 @@ function save(list) {
 }
 
 // 投一顆球
-export function push({ emotion, text }) {
+export function push({ emotion, text, visitor }) {
   const list = load();
-  list.push({
+  const row = {
     d: today(),
     e: emotion,
-    t: (text || '').slice(0, 200),
+    t: (text || '').slice(0, 60),
     s: Math.floor(Math.random() * 1e9),   // 這顆球自己的亂數種子，決定它長出來的枝怎麼歪
-  });
+    v: visitor || 'me',
+  };
+  list.push(row);
   save(list);
+
+  // 同時寫進資料庫。送不出去也沒關係，本機這份還在。
+  if (DB.enabled()) {
+    DB.insert('energy', {
+      visitor: row.v, day: row.d, emotion: row.e, note: row.t, seed: row.s,
+    });
+  }
   return list;
 }
 
@@ -80,6 +111,7 @@ export function summarise(list = load()) {
 
 // 清空（測試用，主控台輸入 ISLAND.energy.reset()）
 export function reset() {
+  cache = [];
   try { localStorage.removeItem(KEY); } catch {}
   return [];
 }

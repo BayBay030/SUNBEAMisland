@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-import { SCENES, START_SCENE, HOME_SCENE, NAMING, EMOTIONS, TREE, CHARACTERS, AVATAR, NET, BROADCAST, ZOOM, GEMS, SKY, LIGHTS } from './config.js';
+import { SCENES, START_SCENE, HOME_SCENE, NAMING, EMOTIONS, TREE, CHARACTERS, AVATAR, NET, BROADCAST, ZOOM, GEMS, SKY, LIGHTS, WATER } from './config.js';
 import { buildPlaceholder, makeNoticeBoard as buildNoticeBoard } from './placeholder.js';
 import { Interaction, Ripples, collectTargets } from './interact.js';
 import { buildSacredTree, updateBalls } from './tree.js';
@@ -21,6 +21,9 @@ import * as Visitor from './visitor.js';
 import { buildCharacter, Walker } from './character.js';
 import * as Net from './net.js';
 import * as Gems from './gems.js';
+import * as DB from './db.js';
+import { ISLAND_BASE } from './config.js';
+import { loadIslandBase, Traffic } from './roadcars.js';
 import { GemField } from './gems.js';
 
 // ---- 介面元件 ----
@@ -56,25 +59,53 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(vw(), vh());
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// 原檔用 Standard 色調轉換（直出，不做電影感壓縮）。
+// ACES 會把這組粉紫壓灰，不做壓縮才對得上參考檔。
+renderer.toneMapping = THREE.NoToneMapping;
 renderer.toneMappingExposure = SKY.exposure;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 wrap.appendChild(renderer.domElement);
 
 // ---- 場景與鏡頭 ----
 const scene = new THREE.Scene();
-const skyTex = makeSkyTexture();
-scene.background = skyTex;
-scene.fog = new THREE.Fog(new THREE.Color(SKY.fog), SKY.fogNear, SKY.fogFar);
 
 const camera = new THREE.PerspectiveCamera(
-  30, vw() / vh(), 0.1, 200
+  30, vw() / vh(), 0.1, 400          // 遠裁切面要夠遠，海有 130 半徑
 );
 
-// 環境光源（讓材質有基本的反射，不然模型會看起來很平）
+// ---- 天空 ----
+// 先用備援漸層把畫面開起來，真圖載到再換掉（不要為了一張圖卡住整個畫面）
+const fallbackSky = makeSkyTexture();
+scene.background = fallbackSky;
+scene.backgroundIntensity = SKY.intensity ?? 1;
+scene.fog = new THREE.Fog(new THREE.Color(SKY.fog), SKY.fogNear, SKY.fogFar);
+
 const pmrem = new THREE.PMREMGenerator(renderer);
-// 用夕陽天空本身當反射環境，金屬、水面才會映到粉色的光
-scene.environment = pmrem.fromEquirectangular(skyTex).texture;
+scene.environment = pmrem.fromEquirectangular(fallbackSky).texture;
+
+if (SKY.image) {
+  new THREE.TextureLoader().load(
+    SKY.image,
+    (tex) => {
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+
+      scene.background = tex;
+      scene.backgroundIntensity = SKY.intensity ?? 1;
+
+      // 水平轉角，對齊原檔 Blender 的設定
+      const r = SKY.rotation ?? 0;
+      scene.backgroundRotation = new THREE.Euler(0, r, 0);
+      scene.environmentRotation = new THREE.Euler(0, r, 0);
+
+      // 同一張圖拿去當反射光源，金屬和海面才會映到真正的夕陽
+      scene.environment = pmrem.fromEquirectangular(tex).texture;
+      scene.environmentIntensity = SKY.envIntensity ?? 1;
+    },
+    undefined,
+    () => console.warn('[島嶼地圖] 天空圖載不到，先用內建漸層')
+  );
+}
 
 const hemi = new THREE.HemisphereLight(
   new THREE.Color(LIGHTS.skyColor),
@@ -119,20 +150,7 @@ function makeSkyTexture() {
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, W, H);
 
-  // 天空裡的太陽：一團暖色光暈。
-  // 這張圖同時拿去當反射環境，所以金屬和水面會真的映到這顆太陽。
-  const sx = SKY.sunX * W;
-  const sy = SKY.sunY * H;
-  const sr = SKY.sunSize * H;
-  const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr);
-  glow.addColorStop(0.0, SKY.sunColor);
-  glow.addColorStop(0.18, SKY.sunColor);
-  glow.addColorStop(0.55, 'rgba(255, 190, 150, 0.35)');
-  glow.addColorStop(1.0, 'rgba(255, 170, 150, 0)');
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, W, H);
-  ctx.globalCompositeOperation = 'source-over';
+  // 這只是備援：真的天空是 textures/sky.png，那張圖本身就有太陽了
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -298,6 +316,7 @@ async function go(id, { instant = false } = {}) {
 
   ballGroup = currentRoot.getObjectByName('今日能量球') ?? null;
   bindScreen();
+  bindWater();
 
   // 泡泡掛在主島底下，拖轉島的時候會跟著轉
   if (GEMS.enabled && def.isOutdoor) {
@@ -305,9 +324,12 @@ async function go(id, { instant = false } = {}) {
     currentRoot.traverse((o) => { if (o.name === 'float_主島') main = o; });
     gemField.setParent(main);
     renderGemCount(false);
+    installIslandBase(main);          // 底板是慢慢載的，不擋畫面先開起來
   } else {
     gemField.setParent(null);
     gemChip.classList.remove('on');
+    traffic?.dispose();
+    traffic = null;
   }
   document.body.classList.toggle('indoor', !def.isOutdoor);
 
@@ -420,7 +442,7 @@ noteEl?.addEventListener('input', () => {
 
 throwBtn?.addEventListener('click', () => {
   if (!chosenEmotion) return;
-  Energy.push({ emotion: chosenEmotion, text: noteEl.value.trim() });
+  Energy.push({ emotion: chosenEmotion, text: noteEl.value.trim(), visitor: me?.id });
   regrowTree();
   treePanel.classList.add('thrown');
   renderTreeStats();
@@ -530,7 +552,7 @@ msgTextEl?.addEventListener('input', () => {
 
 msgSendEl?.addEventListener('click', () => {
   if (!msgTextEl.value.trim()) return;
-  Board.post({ name: msgNameEl.value, text: msgTextEl.value });
+  Board.post({ name: msgNameEl.value, text: msgTextEl.value, visitor: me?.id });
   msgTextEl.value = '';
   msgCountEl.textContent = '0';
   msgSendEl.disabled = true;
@@ -916,10 +938,34 @@ chatInputEl?.addEventListener('keydown', (e) => {
 
 chatInputEl?.addEventListener('blur', () => { /* 失焦就讓快捷鍵恢復 */ });
 
+// 大家共用的那三份資料（神木、公佈欄、鑽石）
+// 先用本機那份把畫面開起來，背景去資料庫撈，撈回來再重畫。
+function startShared() {
+  Gems.setVisitor(me.id);
+
+  // 連不到資料庫時讓畫面講一聲，不然你會以為是程式壞了
+  const placeChip = document.getElementById('place');
+  DB.watchStatus((ok) => {
+    placeChip.classList.toggle('offline', ok === false);
+  });
+
+  Energy.watch(() => { regrowTree(); renderTreeStats(); });
+  Board.watch(() => { renderMessages(); rebuildNoticeBoard(); });
+
+  const pull = () => {
+    Energy.refresh();
+    Board.refresh(me.id);
+    Gems.refresh().then(() => renderGemCount(false));
+  };
+  pull();
+  setInterval(pull, 12000);     // 每 12 秒看一下別人有沒有新動作
+}
+
 function startNet() {
   if (netStarted || !me) return;
   netStarted = true;
   chatEl.classList.add('on');
+  startShared();
 
   Net.start({
     me,
@@ -932,6 +978,18 @@ let screenGroup = null;   // 房間牆上那台螢幕
 
 function bindScreen() {
   screenGroup = currentRoot?.getObjectByName('panel_broadcast') ?? null;
+}
+
+// 海面的波光貼圖慢慢捲動，海才不會是一塊死掉的平面
+let waveTex = null;
+function bindWater() {
+  waveTex = currentRoot?.getObjectByName('海面_nohit')?.userData?.waveTex ?? null;
+}
+function updateWater(dt) {
+  if (!waveTex) return;
+  const sp = WATER.waveSpeed ?? 0.013;
+  waveTex.offset.x = (waveTex.offset.x + dt * sp) % 1;
+  waveTex.offset.y = (waveTex.offset.y + dt * sp * 0.6) % 1;
 }
 
 function updateScreen(t) {
@@ -1006,6 +1064,36 @@ tvPanel?.querySelector('.close')?.addEventListener('click', closeTvPanel);
 tvPanel?.addEventListener('click', (e) => {
   if (e.target === tvPanel) closeTvPanel();
 });
+
+// ---- 主島底板（Blender 匯出的）+ 車流 ----
+let traffic = null;
+
+async function installIslandBase(main) {
+  if (!ISLAND_BASE.enabled || !main) return;
+
+  try {
+    const base = await loadIslandBase();
+
+    // 場景可能在載入期間被換掉了，要再確認一次
+    if (!main.parent) return;
+
+    // 程式生的圓形地面退休，換成真的底板
+    const old = main.children.find((c) => c.name === '島地面');
+    if (old) { main.remove(old); disposeTree(old); }
+
+    main.add(base);
+
+    traffic?.dispose();
+    traffic = new Traffic();
+    await traffic.load(main);
+
+    // 地面換了，可以被點的清單要重算
+    interaction.setTargets(collectTargets(currentRoot, NAMING));
+  } catch (err) {
+    // 載不到就留著原本程式生的地面，不要讓整個島消失
+    console.warn('[島嶼地圖] 底板載入失敗，沿用內建地面', err.message);
+  }
+}
 
 // ---- 鑽石泡泡 ----
 const gemChip = document.getElementById('gem-chip');
@@ -1317,8 +1405,10 @@ function frame() {
   updateFloaters(timer.getElapsed());
   updateFlows(dt);
   updateScreen(timer.getElapsed());
+  updateWater(dt);
   updateZoom(dt);
   gemField.update(dt, timer.getElapsed());
+  traffic?.update(dt);
   updateBalls(ballGroup, timer.getElapsed());
   walker?.update(dt);
   if (avatar) Net.setState({ x: avatar.position.x, z: avatar.position.z, ry: avatar.rotation.y });
@@ -1355,6 +1445,7 @@ window.ISLAND = {
   zoom,
   gems: Gems,
   gemField,
+  get traffic() { return traffic; },
   rebuildNoticeBoard,
   regrowTree,
 };

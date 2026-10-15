@@ -16,6 +16,7 @@
 // ============================================================
 
 import { NET } from './config.js';
+import * as DB from './db.js';
 
 const PRESENCE_KEY = 'island-map.presence.v1';
 const CHAT_KEY = 'island-map.chat.v1';
@@ -107,62 +108,87 @@ const localAdapter = {
 };
 
 // ------------------------------------------------------------
-//  模式二：真的連線（填上網址就會動）
+//  模式二：真的連線（Supabase）
 //
-//  伺服器那邊只要做兩件事：
-//    POST <endpoint>/state   收下 {id,char,name,x,z,ry}，記下來、記時間
-//    GET  <endpoint>/state   回傳 { peers:[...], chat:[...] }
-//  用 Google Apps Script、Vercel 的 Serverless、Supabase 都行。
+//  用五張表：presence（誰在哪）、chat（聊天）、
+//  energy（神木能量）、board（公佈欄）、gems（鑽石）。
+//  這裡只管前兩張，後面三張各自在自己的檔案裡。
 // ------------------------------------------------------------
 const remoteAdapter = {
   init() {},
 
   async publish(state) {
-    await post('/state', { ...me, ...state, at: now() });
+    // 同一個 id 就覆蓋，所以每次回報都是更新自己那一列
+    await DB.insert('presence', {
+      id: me.id,
+      ch: me.char,
+      name: me.name,
+      x: state.x ?? 0,
+      z: state.z ?? 0,
+      ry: state.ry ?? 0,
+      at: new Date().toISOString(),
+    }, { upsert: true });
   },
 
   async fetchPeers() {
-    const data = await get('/state');
-    return (data?.peers ?? []).filter((p) => p.id !== me.id && now() - (p.at ?? 0) < NET.peerTimeout);
+    // 只要最近還有動靜的人
+    const since = new Date(now() - NET.peerTimeout).toISOString();
+    const rows = await DB.select(
+      'presence',
+      `select=*&at=gte.${since}&limit=60`
+    );
+    if (!rows) return [];        // 連不上就當作現在沒看到別人，不要讓畫面壞掉
+    return rows
+      .filter((r) => r.id !== me.id)
+      .map((r) => ({
+        id: r.id,
+        char: r.ch,
+        name: r.name,
+        x: r.x,
+        z: r.z,
+        ry: r.ry,
+        at: Date.parse(r.at),
+      }));
   },
 
   async send(msg) {
-    await post('/chat', msg);
+    await DB.insert('chat', {
+      id: msg.id,
+      from_id: msg.from,
+      name: msg.name,
+      ch: msg.char,
+      body: msg.text,
+      at: new Date(msg.at).toISOString(),
+    });
   },
 
   async fetchChat(sinceAt) {
-    const data = await get('/state');
-    return (data?.chat ?? []).filter((m) => m.at > sinceAt && m.from !== me.id);
+    const since = new Date(sinceAt).toISOString();
+    const rows = await DB.select(
+      'chat',
+      `select=*&at=gt.${since}&order=at.asc&limit=30`
+    );
+    if (!rows) return [];
+    return rows
+      .filter((r) => r.from_id !== me.id)
+      .map((r) => ({
+        id: r.id,
+        from: r.from_id,
+        name: r.name,
+        char: r.ch,
+        text: r.body,
+        at: Date.parse(r.at),
+      }));
   },
 
   bye() {
-    // 關分頁時送不出去也沒關係，對方那邊 30 秒後會自己過期
-    try {
-      navigator.sendBeacon?.(NET.endpoint + '/bye', JSON.stringify({ id: me.id }));
-    } catch {}
+    // 權限規則刻意不給刪除，所以改成把時間戳往回推，
+    // 下一次別人來拿名單時就會自動把你濾掉。
+    const old = new Date(now() - 600000).toISOString();
+    DB.update('presence', `id=eq.${encodeURIComponent(me.id)}`, { at: old });
   },
 };
 
-async function post(path, body) {
-  try {
-    await fetch(NET.endpoint + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    // 連不上就安靜地跳過，畫面照樣要能走
-  }
-}
-
-async function get(path) {
-  try {
-    const r = await fetch(NET.endpoint + path);
-    return r.ok ? await r.json() : null;
-  } catch {
-    return null;
-  }
-}
 
 // ------------------------------------------------------------
 //  共用：讀寫本機的暫存
@@ -217,7 +243,8 @@ export function start(opts) {
   onPeers = opts.onPeers;
   onChat = opts.onChat;
 
-  adapter = NET.mode === 'remote' && NET.endpoint ? remoteAdapter : localAdapter;
+  // 有設定 Supabase 才走連線模式，沒有就退回本機，不要整個壞掉
+  adapter = NET.mode === 'remote' && DB.enabled() ? remoteAdapter : localAdapter;
 
   // 真的連線時 id 就是訪客 id；本機模式才加分頁代號
   if (adapter === localAdapter) {

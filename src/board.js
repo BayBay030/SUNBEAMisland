@@ -7,7 +7,14 @@
 //  去讀寫共用的資料庫，其他檔案一行都不用動。
 // ============================================================
 
+import * as DB from './db.js';
+
 const KEY = 'island-map.board.v1';
+
+let cache = null;
+let onChange = null;
+
+export function watch(fn) { onChange = fn; }
 
 export const LIMITS = {
   name: 12,      // 署名最多幾個字
@@ -23,17 +30,36 @@ function todayStr() {
 }
 
 export function load() {
+  if (cache) return cache;
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const list = JSON.parse(raw);
-    return Array.isArray(list) ? list : [];
+    const list = raw ? JSON.parse(raw) : [];
+    cache = Array.isArray(list) ? list : [];
   } catch {
-    return [];
+    cache = [];
   }
+  return cache;
+}
+
+// 去資料庫拿大家的留言。自己留的那幾則要標回 mine，才看得到「（你）」
+export async function refresh(myVisitor) {
+  if (!DB.enabled()) return load();
+  const rows = await DB.select('board', 'select=*&order=at.desc&limit=100');
+  if (!rows) return load();      // 連不上 → 維持原狀，不要清空大家的留言
+  const cheered = new Set(load().filter((m) => m.cheered).map((m) => m.id));
+  cache = rows.map((r) => ({
+    id: r.id, d: r.day, n: r.name, t: r.body,
+    at: Date.parse(r.at), up: r.up ?? 0,
+    mine: r.visitor === myVisitor,
+    cheered: cheered.has(r.id),
+  }));
+  save(cache);
+  onChange?.(cache);
+  return cache;
 }
 
 function save(list) {
+  cache = list;
   try {
     localStorage.setItem(KEY, JSON.stringify(list));
     return true;
@@ -52,13 +78,14 @@ export function canPost(list = load()) {
   return postedToday(list) < LIMITS.perDay;
 }
 
-export function post({ name, text }) {
+export function post({ name, text, visitor }) {
   const body = (text || '').trim().slice(0, LIMITS.text);
   if (!body) return load();
 
   const list = load();
+  const id = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   list.push({
-    id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+    id,
     d: todayStr(),
     n: (name || '').trim().slice(0, LIMITS.name) || '路過的人',
     t: body,
@@ -67,6 +94,16 @@ export function post({ name, text }) {
     mine: true,           // 自己留的，用來擋每日上限、也用來標「你」
   });
   save(list);
+
+  if (DB.enabled()) {
+    DB.insert('board', {
+      id,
+      visitor: visitor || 'me',
+      day: todayStr(),
+      name: (name || '').trim().slice(0, LIMITS.name) || '路過的人',
+      body,
+    });
+  }
   return list;
 }
 
@@ -78,6 +115,9 @@ export function cheer(id) {
   m.up = (m.up ?? 0) + 1;
   m.cheered = true;
   save(list);
+
+  // 資料庫那邊只開放改 up 這一個欄位，別的改不了
+  if (DB.enabled()) DB.update('board', `id=eq.${encodeURIComponent(id)}`, { up: m.up });
   return list;
 }
 
@@ -91,6 +131,7 @@ export function count(list = load()) {
 }
 
 export function reset() {
+  cache = [];
   try { localStorage.removeItem(KEY); } catch {}
   return [];
 }
