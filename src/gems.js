@@ -116,7 +116,7 @@ export class GemField {
   constructor() {
     this.parent = null;
     this.alive = [];
-    this.nextIn = rand(1.2, 3);
+    this.nextIn = rand(6, 20);   // 第一顆也不用急著出現
     // 射線要打得到的網格。外面會直接參照這個陣列，所以只能就地增刪，不能換掉
     this.pickables = [];
   }

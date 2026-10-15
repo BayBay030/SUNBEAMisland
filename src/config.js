@@ -98,6 +98,14 @@ export const TREE = {
   ballRadius: 0.17,
 
   textLimit: 60,          // 可以留的一小段文字，上限幾個字
+
+  // 樹葉＝白色發光的小球
+  orbSize: 0.19,          // 基本大小（還會再乘品種的 leafScale 和隨機）
+  orbSpread: 0.55,        // 一叢散開的範圍，相對枝長
+  orbGlow: 2.6,           // 發光強度
+  orbTintGlow: true,      // 光的顏色帶一點情緒色。設 false 就是純白光
+  orbDensity: 0.09,       // 能量越多球越密（每一級加成）
+  orbMax: 1400,           // 全樹小球上限，超過就不再加（保護效能）
 };
 
 // ============================================================
@@ -118,6 +126,21 @@ export const FORTUNE_CARDS = [
   { name: '鄰人', line: '主動跟某個人說一句話。', hue: 0xf5a3a3 },
   { name: '深水', line: '今天適合一個人待著，不用解釋。', hue: 0x6c8bb0 },
   { name: '起風', line: '有變化。順著走，不要硬擋。', hue: 0xa8d5ba },
+
+  { name: '繞路', line: '走遠一點的那條路，會看到沒看過的東西。', hue: 0x9ecfa0 },
+  { name: '留白', line: '行程空一格出來，不要補滿。', hue: 0xe8e2d8 },
+  { name: '翻舊', line: '打開那個很久沒開的資料夾。', hue: 0xcdb08a },
+  { name: '微調', line: '不用重做，動一個小地方就夠了。', hue: 0x8fcfd1 },
+  { name: '共振', line: '今天說的話，會有人接住。', hue: 0xf2a6c8 },
+  { name: '慢熟', line: '還沒好不是失敗，是還沒到。', hue: 0xd9b36c },
+  { name: '側風', line: '計畫會偏一點，但偏的方向是對的。', hue: 0x9fb8e0 },
+  { name: '收尾', line: '把只差一點的那件事做完。', hue: 0x7fc8a4 },
+  { name: '近物', line: '答案在你手邊，不在遠方。', hue: 0xf0c09a },
+  { name: '開窗', line: '換個空氣，腦子才轉得動。', hue: 0xa8dce8 },
+  { name: '低語', line: '今天適合聽，不適合說。', hue: 0xa89ec4 },
+  { name: '糖分', line: '給自己一點甜的，不用理由。', hue: 0xffb8c6 },
+  { name: '歸零', line: '今天的進度是零也沒關係。', hue: 0xb4b4c0 },
+  { name: '遠光', line: '想一件三個月後的事。', hue: 0xcfa8e0 },
 ];
 
 // ============================================================
@@ -214,9 +237,9 @@ export const ZOOM = {
 
 export const GEMS = {
   enabled: true,
-  maxAlive: 5,              // 畫面上最多同時幾顆
-  spawnEvery: [3.5, 9],     // 隔幾秒冒一顆（在這個區間隨機）
-  life: [9, 17],            // 一顆活幾秒才自己消失
+  maxAlive: 2,              // 畫面上最多同時幾顆
+  spawnEvery: [45, 120],    // 隔幾秒冒一顆（在這個區間隨機）。拉長＝偶爾才有
+  life: [16, 28],           // 一顆活幾秒才自己消失。出現得少，就讓它待久一點
   radius: 8.4,              // 出現的水平範圍
   height: [0.9, 4.4],       // 出現的高度範圍
   size: 0.27,
@@ -303,6 +326,54 @@ export const ISLAND_BASE = {
   carSpeed: 0.035,                   // 跑一圈要多久的倒數，越大越快
   carScale: 1,                       // 車子相對底板的大小，覺得車太小就調大
 };
+
+// ============================================================
+//  神木的品種
+//  大家的情緒比例決定樹長成什麼形式，不是只有顏色變
+//  前兩名情緒接近的話，參數會按比例混，長出中間型
+// ============================================================
+
+export const TREE_FORMS = {
+  radial:  { name: '放射', spread: 0.95, lift: 0.46, decay: 0.64, kids: 1.7,
+             twist: 0.00, droop: 0.00, leaf: 'blob',  leafScale: 1.00, trunkSides: 9,
+             orbs: 4 },
+
+  spiral:  { name: '螺旋', spread: 0.22, lift: 0.95, decay: 0.70, kids: 1.1,
+             twist: 2.39, droop: 0.00, leaf: 'blob',  leafScale: 0.74, trunkSides: 10,
+             orbs: 3 },
+
+  weeping: { name: '垂枝', spread: 0.95, lift: 0.02, decay: 0.80, kids: 1.9,
+             twist: 0.18, droop: 0.95, leaf: 'drop',  leafScale: 0.92, trunkSides: 9,
+             orbs: 5 },
+
+  crystal: { name: '結晶', spread: 1.10, lift: 0.58, decay: 0.56, kids: 2.0,
+             twist: 0.00, droop: 0.00, leaf: 'shard', leafScale: 0.86, trunkSides: 6,
+             orbs: 6 },
+
+  tangle:  { name: '糾結', spread: 1.45, lift: 0.20, decay: 0.68, kids: 2.4,
+             twist: 0.95, droop: 0.18, leaf: 'blob',  leafScale: 0.68, trunkSides: 11,
+             orbs: 7 },
+
+  canopy:  { name: '傘蓋', spread: 1.30, lift: 0.26, decay: 0.82, kids: 1.5,
+             twist: 0.00, droop: 0.06, leaf: 'flat',  leafScale: 1.35, trunkSides: 8,
+             orbs: 9 },
+};
+
+// 哪種情緒長出哪種樹
+export const EMOTION_FORM = {
+  joy:   'radial',
+  sad:   'weeping',
+  angry: 'crystal',
+  gloom: 'tangle',
+  calm:  'canopy',
+  hope:  'spiral',
+};
+
+// 還沒有人投球時長這種
+export const DEFAULT_FORM = 'radial';
+
+// 第二名情緒除以第一名超過這個數，就會混進來
+export const FORM_BLEND_AT = 0.55;
 
 // 一開始進去哪個場景
 export const START_SCENE = 'island';

@@ -38,11 +38,24 @@ function headers(extra = {}) {
   };
 }
 
+// 連不上時 fetch 預設會卡很久（可能 30 秒以上）才放棄，
+// 所以自己設一個逾時，才不會「明明斷了，畫面上還顯示連線中」。
+const TIMEOUT = 5000;
+
 // 連不上就安靜地回 null / 空陣列，畫面照樣要能動
 async function call(path, init) {
   if (!enabled()) return null;
+
+  // 瀏覽器自己就知道沒網路的話，連試都不用試
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    mark(false);
+    return null;
+  }
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), TIMEOUT);
   try {
-    const r = await fetch(base() + path, init);
+    const r = await fetch(base() + path, { ...init, signal: ac.signal });
     if (!r.ok) {
       console.warn('[島嶼地圖] 資料庫回應', r.status, await r.text().catch(() => ''));
       // 400 之類是我們自己送錯東西，不算斷線；5xx 和 401/403 才算
@@ -53,11 +66,23 @@ async function call(path, init) {
     const t = await r.text();
     return t ? JSON.parse(t) : [];
   } catch (e) {
-    // fetch 直接爆掉 = 真的連不上（斷網、專案被暫停、DNS 掛了…）
-    console.warn('[島嶼地圖] 連不到資料庫', e.message);
+    // fetch 爆掉或逾時 = 連不上（斷網、專案被暫停、DNS 掛了…）
+    console.warn('[島嶼地圖] 連不到資料庫',
+      e.name === 'AbortError' ? `超過 ${TIMEOUT / 1000} 秒沒回應` : e.message);
     mark(false);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+// 瀏覽器層級的斷線／回復是即時的，接起來就不用等逾時
+if (typeof window !== 'undefined') {
+  window.addEventListener('offline', () => mark(false));
+  window.addEventListener('online', () => {
+    // 回來了不代表資料庫活著，打一次確認
+    call('/presence?select=id&limit=1', { headers: headers() });
+  });
 }
 
 // 讀。query 是 PostgREST 的查詢字串，例如 'select=*&order=at.desc&limit=20'

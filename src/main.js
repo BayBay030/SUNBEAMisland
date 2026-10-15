@@ -13,7 +13,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { SCENES, START_SCENE, HOME_SCENE, NAMING, EMOTIONS, TREE, CHARACTERS, AVATAR, NET, BROADCAST, ZOOM, GEMS, SKY, LIGHTS, WATER } from './config.js';
 import { buildPlaceholder, makeNoticeBoard as buildNoticeBoard } from './placeholder.js';
 import { Interaction, Ripples, collectTargets } from './interact.js';
-import { buildSacredTree, updateBalls } from './tree.js';
+import { buildSacredTree, updateBalls, pickForm } from './tree.js';
 import * as Energy from './energy.js';
 import * as Board from './board.js';
 import * as Fortune from './fortune.js';
@@ -411,9 +411,13 @@ function renderTreeStats() {
 
   const top = Object.entries(s.byEmotion).sort((a, b) => b[1] - a[1])[0];
   const topName = EMOTIONS.find((e) => e.id === top[0])?.name ?? top[0];
+  const form = pickForm(s.byEmotion);
+
   treeStatsEl.innerHTML =
     `累積 <b>${s.total}</b> 顆能量，養了 <b>${s.days}</b> 天。<br>` +
-    `今天掛在樹上的有 <b>${todayN}</b> 顆，最多的情緒是<b>${topName}</b>。`;
+    `今天掛在樹上的有 <b>${todayN}</b> 顆，最多的情緒是<b>${topName}</b>。<br>` +
+    `它現在長成<b>${form.label}</b>的樣子` +
+    (form.mix ? `（混了 ${form.mix}%）` : '') + '。';
 }
 
 function openTreePanel() {
